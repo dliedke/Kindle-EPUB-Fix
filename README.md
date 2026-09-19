@@ -1,5 +1,7 @@
 # Kindle EPUB Fix
 
+Automatically fix EPUB files to work with Kindle. Reduce margins and fix long chapters.
+
 Local web application to diagnose, fix, and rebuild EPUB files with a focus on compatibility with **Send to Kindle**.
 
 The interface automatically detects the browser's main configured language:
