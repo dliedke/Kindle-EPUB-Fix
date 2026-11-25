@@ -1992,7 +1992,8 @@
         "fixed",
         `Sumário reconstruído com ${chapterRecords.length} capítulos detectados no livro (${missing.length} estavam ausentes). Assim o Kindle passa a reconhecer cada capítulo.`,
         navRecord.target,
-        "CHAPTERS_REBUILT"
+        "CHAPTERS_REBUILT",
+        { chapters: chapterRecords.length, missing: missing.length }
       );
     }
   }
@@ -2551,6 +2552,11 @@
 
     if (issue.code === "OUTPUT_READY" && Number.isFinite(params.size)) {
       params.size = formatBytes(params.size);
+    }
+
+    // Complemento quando parte dos capítulos foi dividida por tempo de leitura.
+    if (issue.code === "CHAPTERS_SPLIT" && params.splitByTime > 0) {
+      return `${t("issue.CHAPTERS_SPLIT", params)} ${t("issue.CHAPTERS_SPLIT_BY_TIME", params)}`;
     }
 
     const key = `issue.${issue.code}`;
