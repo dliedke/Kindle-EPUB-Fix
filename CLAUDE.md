@@ -88,12 +88,13 @@ Saídas antecipadas, todas via `finalizeWithoutOutput()` e sem gerar EPUB: DRM b
 
 ### Reconstrução do sumário e divisão de capítulos
 
-Com `rebuildChapters` ligado, `expandNavigationFromChapters()` regenera `nav.xhtml` e `toc.ncx` a partir do spine. Antes de rotular, `splitHugeChapter()` decide a divisão de cada capítulo: em capítulos muito longos ele **injeta âncoras (`id`) nos parágrafos de quebra de cena** e devolve os fragmentos — o arquivo não é dividido, só o sumário passa a apontar para os trechos.
+Com `rebuildChapters` ligado, `expandNavigationFromChapters()` regenera `nav.xhtml` e `toc.ncx` a partir do spine. Antes de rotular, `splitHugeChapter()` decide a divisão de cada capítulo: em capítulos muito longos ele **injeta âncoras (`id`) nos parágrafos de quebra de cena** (ou, sem quebras, a cada ~5 min de leitura) e devolve `{ fragments, byReadingTime }` — o arquivo não é dividido, só o sumário passa a apontar para os trechos.
 
 As quebras de cena são detectadas pelo CSS do próprio livro (`detectSceneBreakClasses`, `parseSpacingClasses`, `topMarginEm`): conta como quebra o bloco cuja margem superior passa de `SCENE_BREAK_MIN_EM`. Os limiares de tamanho ficam logo acima de `splitHugeChapter()` em `app.js`:
 
 - `HUGE_CHAPTER_MIN_CHARS` (15000) — a partir de quantos caracteres visíveis um capítulo é candidato à divisão.
 - `CHAPTER_SEGMENT_MIN_CHARS` (6000) — tamanho mínimo de cada trecho, exigido também do que sobra à frente, para não gerar um trecho final minúsculo.
+- `READING_SEGMENT_CHARS` (~10.200) — usado só no **fallback** `splitByReadingTime()`, quando o capítulo não tem nenhuma quebra de cena aproveitável: corta no início de um parágrafo a cada ~5 min de leitura no Kindle (`KINDLE_PAGE_CHARS` 680 × `KINDLE_PAGES_PER_MINUTE` 3 × `READING_SEGMENT_MINUTES` 5, medidos numa página real com a fonte padrão). O número de trechos é arredondado e redistribuído para saírem com tamanhos parecidos.
 
 Sem divisões, os rótulos são números sequenciais (1, 2, 3…); havendo divisões, os títulos existentes no sumário são preservados e os trechos seguintes ganham sufixo ` (n)`.
 

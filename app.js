@@ -1933,8 +1933,12 @@
 
     // Primeiro passo: decide a divisão de cada capítulo (injeta âncoras nos que forem
     // gigantescos) antes de rotular, para saber qual estratégia de rótulo usar.
-    const plans = chapterRecords.map((record) => ({ record, fragments: splitHugeChapter(record.target, contentMap) }));
+    const plans = chapterRecords.map((record) => {
+      const split = splitHugeChapter(record.target, contentMap);
+      return { record, fragments: split?.fragments || null, byReadingTime: Boolean(split?.byReadingTime) };
+    });
     const splitChapters = plans.filter((plan) => plan.fragments && plan.fragments.length > 1).length;
+    const splitByTime = plans.filter((plan) => plan.fragments && plan.byReadingTime).length;
 
     // Nada a fazer: nenhum capítulo ausente do sumário e nenhuma divisão de capítulo.
     if (missing.length === 0 && splitChapters === 0) return;
@@ -1973,11 +1977,15 @@
     });
 
     if (splitChapters > 0) {
+      const byTimeNote = splitByTime > 0
+        ? ` ${splitByTime} deles não tinham quebras de cena e foram divididos a cada ~${READING_SEGMENT_MINUTES} min de leitura.`
+        : "";
       addIssue(
         "fixed",
-        `Sumário reconstruído com ${chapterRecords.length} capítulos; ${splitChapters} capítulo(s) muito longo(s) foram divididos em ${splitParts} trechos pelos espaçamentos internos, para o Kindle navegar cada parte.`,
+        `Sumário reconstruído com ${chapterRecords.length} capítulos; ${splitChapters} capítulo(s) muito longo(s) foram divididos em ${splitParts} trechos, para o Kindle navegar cada parte.${byTimeNote}`,
         navRecord.target,
-        "CHAPTERS_SPLIT"
+        "CHAPTERS_SPLIT",
+        { chapters: chapterRecords.length, splitChapters, splitParts, splitByTime, minutes: READING_SEGMENT_MINUTES }
       );
     } else {
       addIssue(
@@ -1997,6 +2005,13 @@
   const CHAPTER_SEGMENT_MIN_CHARS = 6000;
   // Margem superior mínima (em em) para um parágrafo/elemento contar como quebra de cena.
   const SCENE_BREAK_MIN_EM = 0.9;
+  // Fallback quando o capítulo não tem quebras de cena: divide por tempo de leitura.
+  // Medido numa página real do Kindle (fonte padrão): ~14 linhas de ~48 caracteres
+  // ≈ 680 caracteres por página; lendo ~3 páginas por minuto, 5 minutos ≈ 10.200.
+  const KINDLE_PAGE_CHARS = 680;
+  const KINDLE_PAGES_PER_MINUTE = 3;
+  const READING_SEGMENT_MINUTES = 5;
+  const READING_SEGMENT_CHARS = KINDLE_PAGE_CHARS * KINDLE_PAGES_PER_MINUTE * READING_SEGMENT_MINUTES;
 
   // Divide um capítulo gigantesco em trechos usando os espaçamentos internos como
   // pontos de corte. Não quebra o arquivo: apenas injeta âncoras (id) nos parágrafos
@@ -2028,27 +2043,62 @@
     for (let i = blocks.length - 1; i >= 0; i -= 1) suffixChars[i] = suffixChars[i + 1] + blockChars[i];
 
     const existingIds = collectXmlIds(documentNode);
-    const fragments = [null]; // primeiro trecho = topo do documento
+    let fragments = [null]; // primeiro trecho = topo do documento
     let acc = 0;
     for (let i = 0; i < blocks.length; i += 1) {
       const isBreak = i > 0 && isSceneBreakBlock(blocks[i], breakClasses);
       // Corta aqui se já acumulamos o mínimo E ainda sobra conteúdo suficiente à frente.
       if (isBreak && acc >= CHAPTER_SEGMENT_MIN_CHARS && suffixChars[i] >= CHAPTER_SEGMENT_MIN_CHARS) {
-        const block = blocks[i];
-        let id = (block.getAttribute("id") || "").trim();
-        if (!id) {
-          id = createUniqueId("kef-part", existingIds);
-          block.setAttribute("id", id);
-        }
-        fragments.push(id);
+        fragments.push(anchorBlock(blocks[i], existingIds));
         acc = 0;
       }
       acc += blockChars[i];
     }
 
+    // Sem quebras de cena aproveitáveis: divide por tempo de leitura.
+    let byReadingTime = false;
+    if (fragments.length < 2) {
+      fragments = splitByReadingTime(blocks, blockChars, suffixChars, existingIds);
+      byReadingTime = true;
+    }
+
     if (fragments.length < 2) return null;
     item.data = serializeXmlDocument(documentNode);
+    return { fragments, byReadingTime };
+  }
+
+  // Divide o capítulo em trechos de ~READING_SEGMENT_CHARS (≈ 5 min de leitura no
+  // Kindle), cortando sempre no início de um bloco (parágrafo). O número de trechos é
+  // arredondado e o tamanho-alvo redistribuído, para que saiam todos parecidos em vez
+  // de vários trechos cheios e um último minúsculo.
+  function splitByReadingTime(blocks, blockChars, suffixChars, existingIds) {
+    const fragments = [null];
+    const total = suffixChars[0];
+    const parts = Math.round(total / READING_SEGMENT_CHARS);
+    if (parts < 2) return fragments;
+
+    const target = total / parts;
+    let before = 0;
+    for (let i = 1; i < blocks.length && fragments.length < parts; i += 1) {
+      before += blockChars[i - 1];
+      // Não ancora em bloco sem texto (imagem, espaçador) e não deixa um resto minúsculo,
+      // o que pode acontecer quando os blocos são grandes e o corte cai tarde.
+      if (blockChars[i] === 0 || suffixChars[i] < target / 2) continue;
+      if (before >= target * fragments.length) {
+        fragments.push(anchorBlock(blocks[i], existingIds));
+      }
+    }
     return fragments;
+  }
+
+  // Garante um id no bloco (reaproveitando o existente) para servir de destino no sumário.
+  function anchorBlock(block, existingIds) {
+    let id = (block.getAttribute("id") || "").trim();
+    if (!id) {
+      id = createUniqueId("kef-part", existingIds);
+      block.setAttribute("id", id);
+    }
+    return id;
   }
 
   // Encontra o container real do conteúdo, descendo por wrappers únicos (section/div/
